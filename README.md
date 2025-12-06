@@ -5,10 +5,10 @@
   - [x] Manage multiple clients  
   - [x] Add basic message routing  
 
-- [ ] Create terminal CLI client (Python)
-  - [ ] Connect to server  
-  - [ ] Send/receive messages  
-  - [ ] Add basic commands (`/quit`, `/help`)
+- [x] Create terminal CLI client (Python)
+  - [x] Connect to server  
+  - [x] Send/receive messages  
+  - [x] Add basic commands (`/quit`, `/help`)
 
 ---
 
