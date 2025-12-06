@@ -13,7 +13,7 @@ struct Content {
 fn content_to_bytes(content: &Content) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(content.username.as_bytes());
-    bytes.push(0); // Null byte separator
+    bytes.push(0);
     bytes.extend_from_slice(content.data.as_bytes());
     bytes
 }
@@ -26,30 +26,28 @@ fn bytes_to_content(bytes: &[u8]) -> Content {
     } else {
         String::new()
     };
-
     Content { username, data }
 }
 
 async fn broadcast_message(
     message: &Content,
-    clients: &Arc<Mutex<Vec<tokio::net::TcpStream>>>,
+    clients: &Arc<Mutex<Vec<tokio::net::tcp::OwnedWriteHalf>>>,
 ) {
     let bytes = content_to_bytes(message);
 
     let mut guard = clients.lock().await;
 
-    for client in guard.iter_mut() {
-        let bytes = bytes.clone();
-        let _ = client.write_all(&bytes).await;
+    for writer in guard.iter_mut() {
+        let _ = writer.write_all(&bytes).await;
     }
 }
 
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind(ADDRESS).await.unwrap();
-    println!("Server is running on {}", ADDRESS);
+    println!("Server running on {}", ADDRESS);
 
-    let clients = Arc::new(Mutex::new(Vec::<tokio::net::TcpStream>::new()));
+    let clients = Arc::new(Mutex::new(Vec::<tokio::net::tcp::OwnedWriteHalf>::new()));
 
     loop {
         let (socket, addr) = listener.accept().await.unwrap();
@@ -58,23 +56,31 @@ async fn main() {
         let clients_clone = clients.clone();
 
         tokio::spawn(async move {
-            let mut socket = socket;
-            let mut buff = vec![0u8; 1024];
+            // split stream
+            let (mut reader, writer) = socket.into_split();
+
+            // save writer for broadcast
+            {
+                let mut list = clients_clone.lock().await;
+                list.push(writer);
+            }
+
+            let mut buf = vec![0u8; 1024];
 
             loop {
-                let n = match socket.read(&mut buff).await {
+                let n = match reader.read(&mut buf).await {
                     Ok(0) => {
                         println!("{} disconnected", addr);
                         break;
                     }
                     Ok(n) => n,
                     Err(e) => {
-                        eprintln!("Failed to read from {}: {:?}", addr, e);
+                        eprintln!("read error from {}: {}", addr, e);
                         break;
                     }
                 };
 
-                let msg = bytes_to_content(&buff[..n]);
+                let msg = bytes_to_content(&buf[..n]);
 
                 println!("{}: {}", msg.username, msg.data);
 
