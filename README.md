@@ -7,3 +7,5 @@
       - Connect to server
       - Send/receive messages
       - Add basic commands (/quit, /help)
+
+![image](assets/image.png)
