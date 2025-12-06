@@ -1,5 +1,5 @@
 ## TODO
-- [ ] Implement server
+- [x] Implement server
       - Accept incoming connections
       - Manage multiple clients
       - Add basic message routing

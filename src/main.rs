@@ -1,48 +1,85 @@
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex;
+use std::sync::Arc;
 
 const ADDRESS: &str = "127.0.0.1:8080";
 
-struct content{
+struct Content {
     username: String,
-    data: String
+    data: String,
 }
 
-fn content_to_bytes(content: &content) -> Vec<u8> {
+fn content_to_bytes(content: &Content) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(content.username.as_bytes());
-    bytes.push(0); // Null byte as separator
+    bytes.push(0); // Null byte separator
     bytes.extend_from_slice(content.data.as_bytes());
     bytes
 }
 
-fn bytes_to_content(bytes: &[u8]) -> content {
+fn bytes_to_content(bytes: &[u8]) -> Content {
     let parts: Vec<&[u8]> = bytes.splitn(2, |&b| b == 0).collect();
-    let username = String::from_utf8(parts[0].to_vec()).unwrap_or_default();
+    let username = String::from_utf8_lossy(parts[0]).to_string();
     let data = if parts.len() > 1 {
-        String::from_utf8(parts[1].to_vec()).unwrap_or_default()
+        String::from_utf8_lossy(parts[1]).to_string()
     } else {
         String::new()
     };
-    content { username, data }
+
+    Content { username, data }
 }
 
-async fn handle_client(mut socket: tokio::net::TcpStream, buf: &mut [u8; 1024]){
+async fn broadcast_message(
+    message: &Content,
+    clients: &Arc<Mutex<Vec<tokio::net::TcpStream>>>,
+) {
+    let bytes = content_to_bytes(message);
 
+    let mut guard = clients.lock().await;
+
+    for client in guard.iter_mut() {
+        let bytes = bytes.clone();
+        let _ = client.write_all(&bytes).await;
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind(ADDRESS).await.unwrap();
-
     println!("Server is running on {}", ADDRESS);
 
-    loop{
-        let (mut socket, addr) = listener.accept().await.unwrap();
+    let clients = Arc::new(Mutex::new(Vec::<tokio::net::TcpStream>::new()));
+
+    loop {
+        let (socket, addr) = listener.accept().await.unwrap();
         println!("New connection: {}", addr);
 
-        tokio::spawn(async move{
+        let clients_clone = clients.clone();
 
+        tokio::spawn(async move {
+            let mut socket = socket;
+            let mut buff = vec![0u8; 1024];
+
+            loop {
+                let n = match socket.read(&mut buff).await {
+                    Ok(0) => {
+                        println!("{} disconnected", addr);
+                        break;
+                    }
+                    Ok(n) => n,
+                    Err(e) => {
+                        eprintln!("Failed to read from {}: {:?}", addr, e);
+                        break;
+                    }
+                };
+
+                let msg = bytes_to_content(&buff[..n]);
+
+                println!("{}: {}", msg.username, msg.data);
+
+                broadcast_message(&msg, &clients_clone).await;
+            }
         });
     }
 }
